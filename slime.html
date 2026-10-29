@@ -2072,6 +2072,8 @@ function start() {
   addEventListener('message', onMsg); document.addEventListener('message', onMsg);
   $('bReset').onclick = reset;
   $('hudToggle').onclick = () => $('hud').classList.toggle('open');
+  // ?preview=1: 원 안에 작게 보여주는 미리보기 (설정 버튼/패널/바닥 그림자를 숨긴다)
+  if (new URLSearchParams(location.search).has('preview')) { $('hudToggle').style.display = 'none'; $('hud').style.display = 'none'; shadowFloor.visible = false; }
 
   /* ================= 루프 (고정 스텝) ================= */
   const FIXED = 1 / 90;
