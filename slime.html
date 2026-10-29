@@ -1295,7 +1295,7 @@ function start() {
       const proto = new THREE.Group(); proto.add(tilt);
       base = { proto }; orbCache.set(id, base);
     }
-    return { key: 'kw:' + word, orb: true, proto: base.proto, hullPts: orbHull, pos: ORB_POS[idx % ORB_POS.length].map(v => v * SCALE_K), scale: CHARM_SIZE * 2.5 * 2.5 * ORB_SCALE, yaw: 0 };
+    return { key: 'kw:' + word, orb: true, word, color, strike: !!strike, proto: base.proto, hullPts: orbHull, pos: ORB_POS[idx % ORB_POS.length].map(v => v * SCALE_K), scale: CHARM_SIZE * 2.5 * 2.5 * ORB_SCALE, yaw: 0 };
   }
   function keywordOrbs() {
     const pool = [...ORB_PALETTE];   // 섞어서 앞에서부터 쓰면 단추마다 서로 다른 랜덤 색이 된다
@@ -1303,6 +1303,16 @@ function start() {
     return currentKeywords().map((w, i) => makeOrbTemplate(w.word.trim(), !!w.strikethrough, pool[i % pool.length], i));
   }
 
+  // 말랑이 상태를 앱(React Native WebView / 부모 창)에 알린다: 보관할 때 DB에 넣을 값 (감정별 개수, 키워드 단추의 단어/색)
+  function reportState(list, n, k) {
+    const counts = Object.fromEntries(Object.entries(mongleState.counts || {}).filter(([key]) => !key.startsWith('kw:')));
+    const orbs = [...new Set(list.filter(t => t.orb))].map(t => ({ word: t.word, color: t.color, strikethrough: !!t.strike }));
+    const payload = { type: 'mongle:state', total: n, size: k, counts, orbs };
+    try {
+      if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+      else if (window.parent && window.parent !== window) window.parent.postMessage(payload, '*');
+    } catch {}
+  }
   // 개수 n, 크기 배율 size로 속 물체를 새로 만든다 (물리 바디는 buildCharms가 만든다).
   // perType: [[템플릿, 개수], ...] 를 주면 종류별로 그 개수만큼 만든다 (없으면 count개를 템플릿 순서대로 돌려가며).
   function spawnCharms(count, size, perType) {
@@ -1336,6 +1346,7 @@ function start() {
     if (!n) {   // 속 물체가 하나도 없어도 이전 파티클은 정리하고, 개수 상태도 0으로 맞춘다
       mongleState.count = 0; mongleState.counts = {};
       spawnParticles(perType);
+      reportState(list, 0, k);
       return;
     }
 
@@ -1402,6 +1413,7 @@ function start() {
     mongleState.count = n; mongleState.size = k;
     mongleState.counts = Object.fromEntries(Array.from(new Set(list)).map(t => [t.emotion || t.key || t.model, list.filter(x => x === t).length]));
     spawnParticles(perType);
+    reportState(list, n, k);
   }
   let curUserScale = 1;   // 조절 패널의 '속 물체 크기' 슬라이더 값
 
