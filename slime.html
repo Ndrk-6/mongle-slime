@@ -1,4 +1,4 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Mongle</title>
 <style>
   @font-face { font-family:'Esamanru'; src:url('fonts/esamanru-medium.otf'); font-display:block; }
@@ -2362,9 +2362,24 @@ function start() {
     const dist = (R_REF * 1.03 / fitRatio) / (halfFovT * camera.aspect);
     // 정면에서 바라보는 시점 (틸트 없음) — 어떤 컨테이너 크기에서도 슬라임이 잘리지 않게
     camera.position.set(0, 1.25, dist);
+    controls.target.set(0, 1.25, 0);
     camera.updateProjectionMatrix();
   }
   addEventListener('resize', fit);
+  // 색 선택기(입력창)를 열었다 닫으면 폰 브라우저가 화면을 확대/스크롤해 둔 채로 남을 수 있다 → 닫을 때 원래 시점으로 되돌린다.
+  function resetView() {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0; document.body.scrollTop = 0;
+    fit();
+  }
+  const cColorEl = $('cColor');
+  ['focus', 'blur', 'change'].forEach((t) => cColorEl.addEventListener(t, () => { resetView(); setTimeout(resetView, 150); setTimeout(resetView, 500); }));
+  $('hudToggle').addEventListener('click', () => setTimeout(resetView, 0));
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const onVV = () => { if (vv.offsetTop || vv.offsetLeft || vv.pageTop || vv.pageLeft) resetView(); };
+    vv.addEventListener('resize', onVV); vv.addEventListener('scroll', onVV);
+  }
   new ResizeObserver(fit).observe(stage);
   fit();
 
