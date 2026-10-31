@@ -26,6 +26,50 @@
   <div class="row"><button class="sm" id="bReset">리셋</button></div>
 </div>
 
+<!-- 색 고르기 (Figma: Component 5 알약 558:1075 + 색상 변경/색상 상세 변경 창) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+  #cpPill, #cpPanel { font-family:'Pretendard',-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif; -webkit-tap-highlight-color:transparent; }
+  #cpPill[hidden], #cpPanel[hidden], #cpCustom[hidden], #cpPalette[hidden], #cpMore[hidden], #cpCur[hidden] { display:none !important; }
+  #cpPill { position:fixed; left:8.2vw; bottom:max(env(safe-area-inset-bottom),16px); width:84px; height:45px; border-radius:10px;
+    background:rgba(20,20,20,.88); display:flex; align-items:center; justify-content:space-evenly; z-index:7; }
+  #cpDot { width:24px; height:24px; border-radius:50%; border:1px solid rgba(255,255,255,.25); padding:0; background:#cfeaff; cursor:pointer; }
+  #cpReset { background:none; border:0; color:#fff; font-size:14px; padding:6px 0; font-family:inherit; cursor:pointer; }
+  #cpX { position:absolute; top:-4px; right:4px; width:10px; height:10px; border-radius:50%; background:#5d5d5d; color:#fff; border:0; padding:0;
+    font-size:7px; line-height:10px; text-align:center; cursor:pointer; }
+  #cpX::after { content:''; position:absolute; inset:-12px; }   /* 10px는 손가락으로 누르기 어려워서 누르는 범위만 넓힌다 */
+  #cpPanel { position:fixed; left:8.2vw; right:8.2vw; bottom:calc(max(env(safe-area-inset-bottom),16px) + 57px); background:#2f2f2f;
+    border-radius:18px; padding:16px 20px 14px; z-index:8; color:#fff; box-sizing:border-box; }
+  .cp-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; font-size:16px; font-weight:600; }
+  #cpClose { background:none; border:0; color:#b3b3b3; font-size:16px; padding:0 2px; cursor:pointer; }
+  .cp-swatches { display:grid; grid-template-columns:repeat(4,44px); justify-content:space-between; row-gap:14px; padding:4px 0; }
+  .cp-sw { width:44px; height:44px; border-radius:50%; border:1px solid rgba(255,255,255,.18); padding:0; box-sizing:border-box; cursor:pointer; }
+  .cp-sw.on { border:3px solid #fff; }
+  .cp-label { font-size:13px; font-weight:500; margin:10px 0 7px; }
+  .cp-slider { position:relative; height:14px; border-radius:7px; touch-action:none; cursor:pointer; }
+  .cp-slider::before { content:''; position:absolute; left:0; right:0; top:-10px; bottom:-10px; }   /* 누르는 범위를 위아래로 넓힌다 */
+  .cp-slider i { position:absolute; top:-3px; width:20px; height:20px; margin-left:-10px; border-radius:50%; border:3px solid #fff; box-sizing:border-box; pointer-events:none; }
+  .cp-foot { display:flex; justify-content:space-between; align-items:center; margin-top:16px; }
+  .cp-link { background:none; border:0; color:#fff; font-size:14px; text-decoration:underline; padding:0; font-family:inherit; cursor:pointer; }
+  .cp-done { color:#8ffff4; }
+  #cpCur { width:22px; height:22px; border-radius:50%; border:2px solid #fff; box-sizing:border-box; }
+</style>
+<div id="cpPill" hidden>
+  <button id="cpDot" aria-label="말랑이 색 고르기"></button>
+  <button id="cpReset">리셋</button>
+  <button id="cpX" aria-label="알약 닫기">✕</button>
+</div>
+<div id="cpPanel" hidden>
+  <div class="cp-head"><span id="cpTitle">색상 변경</span><button id="cpClose" aria-label="색상 창 닫기">✕</button></div>
+  <div id="cpPalette" class="cp-swatches"></div>
+  <div id="cpCustom" hidden>
+    <div class="cp-label">색조</div><div class="cp-slider" id="cpH"><i></i></div>
+    <div class="cp-label">채도</div><div class="cp-slider" id="cpS"><i></i></div>
+    <div class="cp-label">값</div><div class="cp-slider" id="cpV"><i></i></div>
+  </div>
+  <div class="cp-foot"><button id="cpMore" class="cp-link">맞춤 설정</button><span id="cpCur" hidden></span><button id="cpDone" class="cp-link cp-done">완료</button></div>
+</div>
+
 
 <script type="importmap">
 {
@@ -2270,6 +2314,82 @@ function start() {
   // 페이지의 ⚙/설정창은 기본으로 숨긴다: 색은 앱의 색 고르기 창(좌측 하단 알약)에서 바꾼다. 개발용으로 보려면 ?hud=1
   if (!new URLSearchParams(location.search).has('hud')) { $('hudToggle').style.display = 'none'; $('hud').style.display = 'none'; }
   if (new URLSearchParams(location.search).has('preview')) { $('hudToggle').style.display = 'none'; $('hud').style.display = 'none'; shadowFloor.visible = false; }
+
+  /* ================= 색 고르기 =================
+     좌측 하단 알약(현재 색 / 리셋 / X) → 색 동그라미를 누르면 "색상 변경"(8색) → "맞춤 설정"에서 색조/채도/값 슬라이더.
+     ?preview(미리보기)나 ?nocolor(보관함 다시 만지기: 바꿔도 저장되지 않음)에서는 숨긴다. */
+  {
+    const q = new URLSearchParams(location.search);
+    const DEFAULT_COLOR = '#cfeaff';
+    const PALETTE = ['#e53935', '#5cf3f6', '#2f4fe8', '#8ee63a', '#f060c8', '#fff04a', '#000000', '#ffffff'];
+    const hexToHsv = (hex) => {
+      const n = parseInt(hex.slice(1), 16);
+      const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+      const max = Math.max(r, g, b), d = max - Math.min(r, g, b);
+      let h = 0;
+      if (d) h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      return { h: (h * 60 + 360) % 360, s: max ? d / max : 0, v: max };
+    };
+    const hsvToHex = ({ h, s, v }) => {
+      const f = (n) => { const k = (n + h / 60) % 6; return Math.round((v - v * s * Math.max(0, Math.min(k, 4 - k, 1))) * 255).toString(16).padStart(2, '0'); };
+      return '#' + f(5) + f(3) + f(1);
+    };
+    let hsv = hexToHsv($('cColor').value);
+
+    const setColor = (hex) => {                  // 껍질 색 바꾸기: 기존 색 입력의 input 이벤트가 재질 변경 + 앱에 알리기를 한다
+      const inp = $('cColor');
+      inp.value = hex;
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      paint();
+    };
+    function paint() {
+      const cur = $('cColor').value.toLowerCase();
+      $('cpDot').style.background = cur;
+      $('cpCur').style.background = cur;
+      for (const b of $('cpPalette').children) b.classList.toggle('on', b.dataset.c === cur);
+      $('cpH').style.background = 'linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)';
+      $('cpS').style.background = `linear-gradient(to right,${hsvToHex({ h: hsv.h, s: 0, v: 1 })},${hsvToHex({ h: hsv.h, s: 1, v: 1 })})`;
+      $('cpV').style.background = `linear-gradient(to right,#000,${hsvToHex({ h: hsv.h, s: hsv.s, v: 1 })})`;
+      $('cpH').firstElementChild.style.left = (hsv.h / 360 * 100) + '%';
+      $('cpS').firstElementChild.style.left = (hsv.s * 100) + '%';
+      $('cpV').firstElementChild.style.left = (hsv.v * 100) + '%';
+    }
+    function setMode(custom) {
+      $('cpTitle').textContent = custom ? '색상 상세 변경' : '색상 변경';
+      $('cpPalette').hidden = custom;
+      $('cpCustom').hidden = !custom;
+      $('cpMore').hidden = custom;
+      $('cpCur').hidden = !custom;
+    }
+    const openPanel = () => { hsv = hexToHsv($('cColor').value); setMode(false); paint(); $('cpPanel').hidden = false; };
+    const closePanel = () => { $('cpPanel').hidden = true; };
+
+    for (const c of PALETTE) {
+      const b = document.createElement('button');
+      b.className = 'cp-sw'; b.dataset.c = c; b.style.background = c; b.setAttribute('aria-label', '색 ' + c);
+      b.onclick = () => { hsv = hexToHsv(c); setColor(c); haptic('light', true); };
+      $('cpPalette').appendChild(b);
+    }
+    // 슬라이더: 누른 자리/끄는 자리로 값을 바로 맞춘다
+    const bindSlider = (el, apply) => {
+      const at = (e) => { const r = el.getBoundingClientRect(); apply(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))); setColor(hsvToHex(hsv)); };
+      el.addEventListener('pointerdown', (e) => { el.setPointerCapture(e.pointerId); at(e); });
+      el.addEventListener('pointermove', (e) => { if (el.hasPointerCapture(e.pointerId)) at(e); });
+    };
+    bindSlider($('cpH'), (t) => { hsv.h = t * 360; });
+    bindSlider($('cpS'), (t) => { hsv.s = t; });
+    bindSlider($('cpV'), (t) => { hsv.v = t; });
+
+    $('cpDot').onclick = () => ($('cpPanel').hidden ? openPanel() : closePanel());
+    $('cpReset').onclick = () => { reset(); hsv = hexToHsv(DEFAULT_COLOR); setColor(DEFAULT_COLOR); haptic('medium', true); };
+    $('cpX').onclick = () => { closePanel(); $('cpPill').hidden = true; };
+    $('cpClose').onclick = closePanel;
+    $('cpMore').onclick = () => { setMode(true); paint(); };
+    $('cpDone').onclick = () => ($('cpCustom').hidden ? closePanel() : setMode(false));
+
+    paint();
+    if (!q.has('preview') && !q.has('nocolor')) $('cpPill').hidden = false;
+  }
 
   /* ================= 루프 (프레임 시간만큼 한 번씩) =================
      고정 1/90초 스텝을 쪼개 돌리면 60fps 화면에서 프레임마다 1번/2번이 번갈아 돌아 움직임이 미세하게 끊겨 보인다.
