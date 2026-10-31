@@ -1351,6 +1351,28 @@ function start() {
     return out;
   }
 
+  /* ================= 햅틱 =================
+     앱이 진동을 울린다 (WebView는 직접 못 울림). kind: soft | light | medium | heavy | rigid | tick(선택 진동)
+     너무 자주 울리면 거슬려서 전체 간격(HAP_GAP)을 둔다. force=true는 간격을 무시 (놓는 순간 등). */
+  const HAP_GAP = 55;            // ms: 이 안에 또 울리지 않는다
+  let lastHap = -1e9;
+  window.__haps = [];            // 테스트용 기록
+  function haptic(kind, force) {
+    const now = performance.now();
+    if (!force && now - lastHap < HAP_GAP) return false;
+    lastHap = now;
+    window.__haps.push([Math.round(now), kind]); if (window.__haps.length > 300) window.__haps.shift();
+    try {
+      const payload = { type: 'mongle:haptic', kind };
+      if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+      else if (window.parent && window.parent !== window) window.parent.postMessage(payload, '*');
+    } catch {}
+    return true;
+  }
+  // 속 물체 충돌: 프레임 안에서 가장 센 것 하나만 모아서 울린다 (세기 power = 상대 속도)
+  let hitPower = 0, hitWall = false;
+  function hapticHit(power, wall) { if (power > hitPower) { hitPower = power; hitWall = !!wall; } }
+
   // 말랑이 상태를 앱(React Native WebView / 부모 창)에 알린다: 보관할 때 DB에 넣을 값 (감정별 개수, 키워드 단추의 단어/색)
   function reportState(list, n, k) {
     const counts = Object.fromEntries(Object.entries(mongleState.counts || {}).filter(([key]) => !key.startsWith('kw:')));
@@ -1925,9 +1947,15 @@ function start() {
         continue;
       }
       if (d > inner) {             // 껍질 근처: 안쪽으로 부드럽게 밀어낸다
+        if (!c.nearWall) {         // 껍질에 막 닿은 순간: 바깥으로 향하는 속도가 있으면 '톡' (햅틱)
+          const out = (lv.x() - vx) * dx + (lv.y() - vy) * dy + (lv.z() - vz) * dz;
+          if (out > 0.12) hapticHit(out * 0.7, true);
+        }
+        c.nearWall = true;
         const k = (d - inner) / (hard - inner);
         fx += -dx * 120 * k * mass; fy += -dy * 120 * k * mass; fz += -dz * 120 * k * mass;
       }
+      if (d <= inner) c.nearWall = false;
       _fV.setValue(fx, fy, fz); c.body.activate(); c.body.applyCentralForce(_fV);
       _fV.setValue(tx, ty, tz); c.body.applyTorque(_fV);
     }
@@ -2055,6 +2083,7 @@ function start() {
 
   // 캡처 단계에서 먼저 처리 → 슬라임을 잡으면 OrbitControls 비활성화
   let activeId = null, downInfo = null;
+  let stretchPeak = 0, stretchAcc = 0, stretchPrev = 0;   // 햅틱: 늘린 최대치 / 마지막 진동 이후 누적 변화량 / 직전 길이
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     if (activeId !== null) { e.stopImmediatePropagation(); return; }   // 잡고 있는 중엔 다른 손가락 무시
@@ -2063,6 +2092,8 @@ function start() {
     const hit = pickSlime();
     if (!hit) return;
 
+    haptic('light', true);   // 말랑이를 잡은 순간
+    shakeReset(e);
     activeId = e.pointerId;
     downInfo = { x: e.clientX, y: e.clientY, t: performance.now(), hit: hit.point.clone(), dir: raycaster.ray.direction.clone() };
     controls.enabled = false;
@@ -2093,7 +2124,26 @@ function start() {
     }
   }, true);
 
-  addEventListener('pointermove', (e) => { if (activeId === null || e.pointerId === activeId) setMouse(e); });
+  // 흔들기 감지: 손가락을 잡은 채 빠르게 왔다갔다(방향 반전 3번 이상, 0.8초 안) 하면 흔드는 중
+  let shk = null, shakingUntil = 0;
+  function shakeReset(e) { shk = { x: e.clientX, y: e.clientY, t: performance.now(), vx: 0, vy: 0, rev: [] }; shakingUntil = 0; }
+  function shakeMove(e) {
+    if (!shk) return;
+    const t = performance.now(), dt = (t - shk.t) / 1000;
+    if (dt < 0.016) return;
+    const vx = (e.clientX - shk.x) / dt, vy = (e.clientY - shk.y) / dt;
+    const sp = Math.hypot(vx, vy);
+    if (sp > 350 && shk.vx * vx + shk.vy * vy < 0 && Math.hypot(shk.vx, shk.vy) > 350) {
+      shk.rev.push(t);
+      shk.rev = shk.rev.filter((u) => t - u < 800);
+      if (shk.rev.length >= 3) shakingUntil = t + 250;
+    }
+    shk.x = e.clientX; shk.y = e.clientY; shk.t = t; shk.vx = vx; shk.vy = vy;
+  }
+  addEventListener('pointermove', (e) => {
+    if (activeId === null || e.pointerId === activeId) setMouse(e);
+    if (activeId !== null && e.pointerId === activeId) shakeMove(e);
+  });
   function release(e) {
     if (e && activeId !== null && e.pointerId !== activeId) return;   // 다른 손가락은 무시
     if (e && e.type === 'pointerup' && grab && downInfo) {
@@ -2101,6 +2151,11 @@ function start() {
       // 거의 안 움직인 짧은 탭 → 꾹 눌러주기
       if (moved < 12 && performance.now() - downInfo.t < 300) squish = { hit: downInfo.hit, dir: downInfo.dir, t: 0.16 };
     }
+    if (e && activeId !== null) {   // 놓는 순간: 많이 늘렸다면 튕겨 돌아오는 느낌, 짧은 탭이면 가볍게
+      if (stretchPeak > R * 0.35) haptic(stretchPeak > R * 0.7 ? 'heavy' : 'medium', true);
+      else if (squish) haptic('soft', true);
+    }
+    stretchPeak = 0; stretchAcc = 0; stretchPrev = 0; shk = null;
     grab = null; poke = null; activeId = null; downInfo = null;
     controls.enabled = true;
   }
@@ -2109,14 +2164,17 @@ function start() {
   addEventListener('blur', () => release());
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());   // 길게 누르기로 터치 취소되는 것 방지
 
+  let stretchLen = 0;   // 잡아당긴 거리 (햅틱용)
   function applyInteraction() {
     const nodes = sb.get_m_nodes();
+    stretchLen = 0;
 
     if (grab) {
       raycaster.setFromCamera(mouse, camera);
       if (!raycaster.ray.intersectPlane(grab.plane, target)) return;
       offset.copy(target).sub(grab.hit);
       if (offset.length() > 5) offset.setLength(5);
+      stretchLen = offset.length();
 
       for (let j = 0; j < grab.idx.length; j++) {
         const i = grab.idx[j];
@@ -2170,10 +2228,25 @@ function start() {
   addEventListener('keydown', (e) => { if (e.code === 'KeyR') reset(); });
 
   /* ================= 조절 패널 ================= */
+  function reportColor() {
+    const payload = { type: 'mongle:color', color: $('cColor').value };
+    if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+    else if (window.parent && window.parent !== window) window.parent.postMessage(payload, '*');
+  }
   $('cColor').addEventListener('input', (e) => {
     slimeMat.color.set(e.target.value);
     slimeMat.attenuationColor.set(e.target.value);
+    reportColor();
   });
+  $('cColor').addEventListener('change', reportColor);
+  // ?color=#rrggbb: 보관해 둔 말랑이를 그 색으로 다시 만든다
+  const qColor = new URLSearchParams(location.search).get('color');
+  if (qColor && /^#[0-9a-fA-F]{6}$/.test(qColor)) {
+    $('cColor').value = qColor;
+    slimeMat.color.set(qColor);
+    slimeMat.attenuationColor.set(qColor);
+  }
+  reportColor();
   // 앱에서 계산한 개수/크기 적용: window.setMongle({ count: 12, size: 1.3 }) — 생략한 값은 그대로 둔다.
   // 감정 점수를 주면 종류별 개수를 수식으로 계산한다: window.setMongle({ emotions: [{ id: 'joy', score: 38.7 }, ...] })
   window.setMongle = (opts) => {
@@ -2224,9 +2297,58 @@ function start() {
       world.stepSimulation(stepDt, 0);
     }
 
+    hapticFrame();
     syncMesh();
     controls.update();
     renderer.render(scene, camera);
+  }
+
+  // 속 물체끼리 막 부딪힌 쌍을 찾는다 (이번 프레임에 새로 접촉 + 상대 속도가 있는 것)
+  let prevPairs = new Set(), touchT = -1e9;
+  function charmCollisions() {
+    const nm = dispatcher.getNumManifolds();
+    const byPtr = new Map();
+    for (const c of CHARMS) if (c.body && c.inWorld) byPtr.set(Ammo.getPointer(c.body), c);
+    const now = new Set();
+    for (let i = 0; i < nm; i++) {
+      const mf = dispatcher.getManifoldByIndexInternal(i);
+      if (mf.getNumContacts() === 0) continue;
+      const p0 = Ammo.getPointer(mf.getBody0()), p1 = Ammo.getPointer(mf.getBody1());
+      const a = byPtr.get(p0), b = byPtr.get(p1);
+      if (!a || !b) continue;
+      const key = p0 < p1 ? p0 + '|' + p1 : p1 + '|' + p0;
+      now.add(key);
+      if (prevPairs.has(key)) continue;
+      const va = a.body.getLinearVelocity(), vb = b.body.getLinearVelocity();
+      hapticHit(Math.hypot(va.x() - vb.x(), va.y() - vb.y(), va.z() - vb.z()), false);
+    }
+    prevPairs = now;
+  }
+
+  // 프레임마다 한 번: 흔들기 > 충돌 > 당기는 진동 순으로 우선한다 (한 프레임에 하나만)
+  function hapticFrame() {
+    const now = performance.now();
+    charmCollisions();
+    if (grab) {
+      stretchPeak = Math.max(stretchPeak, stretchLen);
+      stretchAcc += Math.abs(stretchLen - stretchPrev);
+      stretchPrev = stretchLen;
+    }
+    let did = false;
+    if (activeId !== null && now < shakingUntil) {
+      did = haptic('rigid');                                   // 흔드는 중: 짧게 연속
+    }
+    // 만지지 않을 때(처음 떨어질 때, 가만히 있을 때)는 울리지 않는다: 만지는 중이거나 놓은 뒤 1.5초까지만
+    if (activeId !== null) touchT = now;
+    if (!did && hitPower > 0.12 && now - touchT < 1500) {                             // 물체끼리/껍질에 부딪힘: 세기별로
+      const p = hitPower;
+      did = haptic(p > 1.2 ? 'medium' : p > 0.5 ? 'light' : 'soft');
+    }
+    if (!did && grab && stretchLen > R * 0.12 && stretchAcc > R * 0.07) {
+      // 끈적하게 당기는 중: 움직인 거리만큼 '드르륵' (많이 늘릴수록 같은 거리에 더 자주)
+      if (haptic('tick')) stretchAcc = 0;
+    }
+    hitPower = 0;
   }
 
   function fit() {
