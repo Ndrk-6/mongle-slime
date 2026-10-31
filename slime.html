@@ -2267,8 +2267,8 @@ function start() {
   $('bReset').onclick = reset;
   $('hudToggle').onclick = () => $('hud').classList.toggle('open');
   // ?preview=1: 원 안에 작게 보여주는 미리보기 (설정 버튼/패널/바닥 그림자를 숨긴다)
-  // ?nohud=1: 앱이 색 고르기 창을 따로 가지고 있어서 페이지의 ⚙/설정창을 숨긴다 (바닥 그림자는 그대로)
-  if (new URLSearchParams(location.search).has('nohud')) { $('hudToggle').style.display = 'none'; $('hud').style.display = 'none'; }
+  // 페이지의 ⚙/설정창은 기본으로 숨긴다: 색은 앱의 색 고르기 창(좌측 하단 알약)에서 바꾼다. 개발용으로 보려면 ?hud=1
+  if (!new URLSearchParams(location.search).has('hud')) { $('hudToggle').style.display = 'none'; $('hud').style.display = 'none'; }
   if (new URLSearchParams(location.search).has('preview')) { $('hudToggle').style.display = 'none'; $('hud').style.display = 'none'; shadowFloor.visible = false; }
 
   /* ================= 루프 (프레임 시간만큼 한 번씩) =================
